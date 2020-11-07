@@ -1,0 +1,315 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: jmp <jasonpenilla2@me.com>
+Date: Wed, 28 Oct 2020 23:57:12 -0700
+Subject: [PATCH] Port Carpet Mod Chainstone mechanic
+
+This patch is a port of
+https://github.com/gnembon/fabric-carpet/blob/01afdf650d8235a13c482b2a273e9e699eae05f1/src/main/java/carpet/mixins/PistonHandler_customStickyMixin.java
+which is released under the MIT license as a part of Carpet Mod
+
+diff --git a/src/main/java/net/minecraft/server/BlockPiston.java b/src/main/java/net/minecraft/server/BlockPiston.java
+index 5d3bb5f39..0ed567fb5 100644
+--- a/src/main/java/net/minecraft/server/BlockPiston.java
++++ b/src/main/java/net/minecraft/server/BlockPiston.java
+@@ -247,6 +247,7 @@ public class BlockPiston extends BlockDirectional {
+         return true;
+     }
+ 
++    public static boolean isMovable(IBlockData iBlockData, World world, BlockPosition blockPosition, EnumDirection direction, boolean flag, EnumDirection direction1) { return a(iBlockData, world, blockPosition, direction, flag, direction1); } // Pupur - OBFHELPER
+     public static boolean a(IBlockData iblockdata, World world, BlockPosition blockposition, EnumDirection enumdirection, boolean flag, EnumDirection enumdirection1) {
+         if (blockposition.getY() >= 0 && blockposition.getY() <= world.getBuildHeight() - 1 && world.getWorldBorder().a(blockposition)) {
+             if (iblockdata.isAir()) {
+diff --git a/src/main/java/net/minecraft/server/PistonExtendsChecker.java b/src/main/java/net/minecraft/server/PistonExtendsChecker.java
+index 95aeaaf0b..d0d04d0b5 100644
+--- a/src/main/java/net/minecraft/server/PistonExtendsChecker.java
++++ b/src/main/java/net/minecraft/server/PistonExtendsChecker.java
+@@ -5,14 +5,14 @@ import java.util.List;
+ 
+ public class PistonExtendsChecker {
+ 
+-    private final World a;
+-    private final BlockPosition b;
++    private final World a; private World getWorld() { return this.a; } // Purpur - OBFHELPER
++    private final BlockPosition b; private BlockPosition getPositionFrom() { return this.b; } // Purpur - OBFHELPER
+     private final boolean c;
+-    private final BlockPosition d;
+-    private final EnumDirection e;
++    private final BlockPosition d; private BlockPosition getPositionTo() { return this.d; } // Purpur - OBFHELPER
++    private final EnumDirection e; private EnumDirection getMotionDirection() { return this.e; } // Purpur - OBFHELPER
+     private final List<BlockPosition> f = Lists.newArrayList();
+     private final List<BlockPosition> g = Lists.newArrayList();
+-    private final EnumDirection h;
++    private final EnumDirection h; private EnumDirection getPistonDirection() { return this.h; } // Purpur - OBFHELPER
+ 
+     public PistonExtendsChecker(World world, BlockPosition blockposition, EnumDirection enumdirection, boolean flag) {
+         this.a = world;
+@@ -29,25 +29,39 @@ public class PistonExtendsChecker {
+ 
+     }
+ 
++    public boolean calculatePush() { return this.a(); } // Purpur - OBFHELPER
+     public boolean a() {
+         this.f.clear();
+         this.g.clear();
+-        IBlockData iblockdata = this.a.getType(this.d);
++        // Purpur start
++        IBlockData iblockdata = this.getWorld().getType(this.getPositionTo());
+ 
+-        if (!BlockPiston.a(iblockdata, this.a, this.d, this.e, false, this.h)) {
++        if (!BlockPiston.isMovable(iblockdata, this.getWorld(), this.getPositionTo(), this.getMotionDirection(), false, this.getPistonDirection())) {
+             if (this.c && iblockdata.getPushReaction() == EnumPistonReaction.DESTROY) {
+-                this.g.add(this.d);
++                this.getBrokenBlocks().add(this.getPositionTo());
+                 return true;
+             } else {
+                 return false;
+             }
+-        } else if (!this.a(this.d, this.e)) {
++        } else if (!this.tryMove(this.getPositionTo(), this.getMotionDirection())) {
+             return false;
+         } else {
+             for (int i = 0; i < this.f.size(); ++i) {
+                 BlockPosition blockposition = (BlockPosition) this.f.get(i);
+ 
+-                if (a(this.a.getType(blockposition).getBlock()) && !this.a(blockposition)) {
++                if (net.pl3x.purpur.PurpurConfig.chainstone) {
++                    BlockPosition pos = this.getMovedBlocks().get(i);
++                    IBlockData chainState = this.getWorld().getType(pos);
++                    // chain is sideways
++                    if (chainState.getBlock() == Blocks.CHAIN
++                            && !isChainOnAxis(chainState, this.getMotionDirection())
++                            && !this.canMoveAdjacentBlock(pos)
++                    ) {
++                        return false;
++                    }
++                }
++                if (this.redirectIsStickyBlock(this.getWorld().getType(blockposition).getBlock()) && !this.canMoveAdjacentBlock(blockposition)) {
++                    // Purpur end
+                     return false;
+                 }
+             }
+@@ -56,23 +70,33 @@ public class PistonExtendsChecker {
+         }
+     }
+ 
++    private static boolean isBlockSticky(Block block) { return a(block); } // Purpur - OBFHELPER
+     private static boolean a(Block block) {
+         return block == Blocks.SLIME_BLOCK || block == Blocks.HONEY_BLOCK;
+     }
+ 
++    private static boolean isAdjacentBlockStuck(Block block, Block block1) { return a(block, block1); } // Purpur - OBFHELPER
+     private static boolean a(Block block, Block block1) {
+-        return block == Blocks.HONEY_BLOCK && block1 == Blocks.SLIME_BLOCK ? false : (block == Blocks.SLIME_BLOCK && block1 == Blocks.HONEY_BLOCK ? false : a(block) || a(block1));
++        // Purpur start
++        if (block == Blocks.HONEY_BLOCK && block1 == Blocks.SLIME_BLOCK) return false;
++        if (block == Blocks.SLIME_BLOCK && block1 == Blocks.HONEY_BLOCK) return false;
++        return isBlockSticky(block) || isBlockSticky(block1);
++        // Purpur end
+     }
+ 
++    private boolean tryMove(BlockPosition blockPosition, EnumDirection enumDirection) { return this.a(blockPosition, enumDirection); } // Purpur - OBFHELPER
+     private boolean a(BlockPosition blockposition, EnumDirection enumdirection) {
+-        IBlockData iblockdata = this.a.getType(blockposition);
++        // Purpur start
++        IBlockData iblockdata = this.getWorld().getType(blockposition);
++        this.currentState = iblockdata;
++        this.previousState = iblockdata;
+         Block block = iblockdata.getBlock();
+ 
+         if (iblockdata.isAir()) {
+             return true;
+-        } else if (!BlockPiston.a(iblockdata, this.a, blockposition, this.e, false, enumdirection)) {
++        } else if (!BlockPiston.isMovable(iblockdata, this.getWorld(), blockposition, this.getMotionDirection(), false, enumdirection)) {
+             return true;
+-        } else if (blockposition.equals(this.b)) {
++        } else if (blockposition.equals(this.getPositionFrom())) {
+             return true;
+         } else if (this.f.contains(blockposition)) {
+             return true;
+@@ -82,13 +106,21 @@ public class PistonExtendsChecker {
+             if (i + this.f.size() > 12) {
+                 return false;
+             } else {
+-                while (a(block)) {
+-                    BlockPosition blockposition1 = blockposition.shift(this.e.opposite(), i);
++                while (this.redirectIsStickyBlock(block)) {
++                    BlockPosition blockposition1 = blockposition.shift(this.getMotionDirection().opposite(), i);
+                     Block block1 = block;
+ 
+-                    iblockdata = this.a.getType(blockposition1);
++                    this.previousState = iblockdata;
++                    iblockdata = this.getWorld().getType(blockposition1);
++                    this.currentState = iblockdata;
+                     block = iblockdata.getBlock();
+-                    if (iblockdata.isAir() || !a(block1, block) || !BlockPiston.a(iblockdata, this.a, blockposition1, this.e, false, this.e.opposite()) || blockposition1.equals(this.b)) {
++                    if (
++                            iblockdata.isAir()
++                                    || !this.isDraggingPreviousBlockBehind(block1, block, blockposition1)
++                                    || !BlockPiston.isMovable(iblockdata, this.getWorld(), blockposition1, this.getMotionDirection(), false, this.getMotionDirection().opposite())
++                                    || blockposition1.equals(this.getPositionFrom())
++                    ) {
++                        // Purpur end
+                         break;
+                     }
+ 
+@@ -103,14 +135,14 @@ public class PistonExtendsChecker {
+                 int k;
+ 
+                 for (k = i - 1; k >= 0; --k) {
+-                    this.f.add(blockposition.shift(this.e.opposite(), k));
++                    this.getMovedBlocks().add(blockposition.shift(this.getMotionDirection().opposite(), k)); // Purpur
+                     ++j;
+                 }
+ 
+                 k = 1;
+ 
+                 while (true) {
+-                    BlockPosition blockposition2 = blockposition.shift(this.e, k);
++                    BlockPosition blockposition2 = blockposition.shift(this.getMotionDirection(), k); // Purpur
+                     int l = this.f.indexOf(blockposition2);
+ 
+                     if (l > -1) {
+@@ -119,7 +151,10 @@ public class PistonExtendsChecker {
+                         for (int i1 = 0; i1 <= l + j; ++i1) {
+                             BlockPosition blockposition3 = (BlockPosition) this.f.get(i1);
+ 
+-                            if (a(this.a.getType(blockposition3).getBlock()) && !this.a(blockposition3)) {
++                            // Purpur start
++                            this.currentState = this.getWorld().getType(blockposition3);
++                            if (this.redirectIsStickyBlock(this.currentState.getBlock()) && !this.canMoveAdjacentBlock(blockposition3)) {
++                                // Purpur end
+                                 return false;
+                             }
+                         }
+@@ -132,7 +167,7 @@ public class PistonExtendsChecker {
+                         return true;
+                     }
+ 
+-                    if (!BlockPiston.a(iblockdata, this.a, blockposition2, this.e, true, this.e) || blockposition2.equals(this.b)) {
++                    if (!BlockPiston.isMovable(iblockdata, this.getWorld(), blockposition2, this.getMotionDirection(), true, this.getMotionDirection()) || blockposition2.equals(this.getPositionFrom())) { // Purpur
+                         return false;
+                     }
+ 
+@@ -167,19 +202,34 @@ public class PistonExtendsChecker {
+         this.f.addAll(list2);
+     }
+ 
++    private boolean canMoveAdjacentBlock(BlockPosition blockPosition) { return this.a(blockPosition); } // Purpur - OBFHELPER
+     private boolean a(BlockPosition blockposition) {
+-        IBlockData iblockdata = this.a.getType(blockposition);
+-        EnumDirection[] aenumdirection = EnumDirection.values();
+-        int i = aenumdirection.length;
+-
+-        for (int j = 0; j < i; ++j) {
+-            EnumDirection enumdirection = aenumdirection[j];
+-
+-            if (enumdirection.n() != this.e.n()) {
+-                BlockPosition blockposition1 = blockposition.shift(enumdirection);
+-                IBlockData iblockdata1 = this.a.getType(blockposition1);
+-
+-                if (a(iblockdata1.getBlock(), iblockdata.getBlock()) && !this.a(blockposition1, enumdirection)) {
++        // Purpur start
++        IBlockData blockData = this.getWorld().getType(blockposition);
++
++        for (EnumDirection direction : EnumDirection.values()) {
++            if (direction.getAxis() != this.getMotionDirection().getAxis()) {
++                BlockPosition shiftedPosition = blockposition.shift(direction);
++                IBlockData shiftedBlockData = this.getWorld().getType(shiftedPosition);
++
++                if (net.pl3x.purpur.PurpurConfig.chainstone) {
++                    if (blockData.getBlock() == Blocks.CHAIN && isChainOnAxis(blockData, direction) && !shiftedBlockData.isAir()) {
++                        Block otherBlock = shiftedBlockData.getBlock();
++                        if (
++                                (otherBlock == Blocks.CHAIN && (blockData.get(BlockChain.AXIS) == shiftedBlockData.get(BlockChain.AXIS)))
++                                        || net.pl3x.purpur.PurpurConfig.chainstoneStickToAll
++                                        || isEndRodOnAxis(shiftedBlockData, blockData.get(BlockChain.AXIS))
++                                        || otherBlock == Blocks.HONEY_BLOCK
++                                        || Block.a(this.getWorld(), shiftedPosition, direction.opposite())
++                        ) {
++                            if (!tryMove(shiftedPosition, direction)) {
++                                return false;
++                            }
++                        }
++                    }
++                }
++                if (isAdjacentBlockStuck(shiftedBlockData.getBlock(), blockData.getBlock()) && !this.tryMove(shiftedPosition, direction)) {
++                    // Purpur end
+                     return false;
+                 }
+             }
+@@ -195,4 +245,59 @@ public class PistonExtendsChecker {
+     public List<BlockPosition> getBrokenBlocks() {
+         return this.g;
+     }
++
++    // Purpur start
++    private IBlockData currentState;
++    private IBlockData previousState;
++
++    private boolean redirectIsStickyBlock(Block block) {
++        return this.blockCanBePulled(currentState) || isBlockSticky(block);
++    }
++
++    private boolean blockCanBePulled(IBlockData blockState) {
++        if (net.pl3x.purpur.PurpurConfig.chainstone && blockState.getBlock() == Blocks.CHAIN) {
++            return this.isChainOnAxis(currentState, this.getMotionDirection());
++        }
++        return false;
++    }
++
++    private boolean isChainOnAxis(IBlockData state, EnumDirection stickDirection) {
++        EnumDirection.EnumAxis axis;
++        try {
++            axis = state.get(BlockChain.AXIS);
++        } catch (IllegalArgumentException e) {
++            return false;
++        }
++        return stickDirection.getAxis() == axis;
++    }
++
++    private boolean isEndRodOnAxis(IBlockData state, EnumDirection.EnumAxis stickAxis) {
++        if (state.getBlock() != Blocks.END_ROD) {
++            return false;
++        }
++        EnumDirection facing;
++        try {
++            facing = state.get(BlockEndRod.FACING);
++        } catch (IllegalArgumentException e) {
++            return false;
++        }
++        return stickAxis == facing.getAxis();
++    }
++
++    private boolean isDraggingPreviousBlockBehind(Block previous, Block next, BlockPosition currentPos) {
++        if (net.pl3x.purpur.PurpurConfig.chainstone) {
++            if (this.previousState.getBlock() == Blocks.CHAIN && isChainOnAxis(this.previousState, this.getMotionDirection())) {
++                if (
++                        (this.currentState.getBlock() == Blocks.CHAIN && isChainOnAxis(this.currentState, this.getMotionDirection()))
++                                || net.pl3x.purpur.PurpurConfig.chainstoneStickToAll
++                                || isEndRodOnAxis(this.currentState, this.getMotionDirection().getAxis())
++                                || Block.a(this.getWorld(), currentPos, this.getMotionDirection())
++                ) {
++                    return true;
++                }
++            }
++        }
++        return isAdjacentBlockStuck(previous, next);
++    }
++    // Purpur end
+ }
+diff --git a/src/main/java/net/pl3x/purpur/PurpurConfig.java b/src/main/java/net/pl3x/purpur/PurpurConfig.java
+index 6cfc1094b..ce2eda099 100644
+--- a/src/main/java/net/pl3x/purpur/PurpurConfig.java
++++ b/src/main/java/net/pl3x/purpur/PurpurConfig.java
+@@ -245,4 +245,11 @@ public class PurpurConfig {
+     private static void fixClientAdvancementLag() {
+         fixClientAdvancementLag = getBoolean("settings.fix-client-lag-from-advancements-api", fixClientAdvancementLag);
+     }
++
++    public static boolean chainstone = false;
++    public static boolean chainstoneStickToAll = false;
++    private static void chainstone() {
++        chainstone = getBoolean("settings.chainstone.enabled", chainstone);
++        chainstoneStickToAll = getBoolean("settings.chainstone.stick-to-all", chainstoneStickToAll);
++    }
+ }
